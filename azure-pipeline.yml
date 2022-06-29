@@ -1,0 +1,106 @@
+trigger: none
+
+parameters:
+  - name: environment
+    type: string
+    displayName: To which environment pipeline has to be run?
+    default: d
+    values:
+      - e
+      - d
+      - t
+      - a
+      - p
+
+variables:
+  - template: /reference_templates/bicep/configuration/${{ parameters.environment }}/variables.yml
+
+stages:
+  - stage: 
+    displayName: Deployment
+
+    jobs: 
+      - job: KubernetesDeployment
+        displayName: "Deploy '${{ variables.clusterName }}' with AKS '${{ variables.aksVersion }}'"
+
+        steps:
+          # - task: AzureCLI@2
+          #   displayName: 'az aks destroy'
+          #   inputs:
+          #     azureSubscription: $(resourceGroup)
+          #     scriptType: 'bash'
+          #     scriptLocation: 'inlineScript'
+          #     inlineScript: |
+          #         echo "removing AKS instance $(clusterName)..."
+          #         az aks delete \
+          #             --subscription $(subscription) \
+          #             --resource-group $(resourceGroup) \
+          #             --name $(clusterName) \
+          #             -y
+          #         echo "AKS instance $(clusterName) removed successfully"
+
+          # - task: AzureCLI@2
+          #   displayName: 'DDelete Delgegation pod Subnet'
+          #   inputs:
+          #     azureSubscription: $(resourceGroup) 
+          #     scriptType: 'bash'
+          #     scriptLocation: 'inlineScript'
+          #     inlineScript: >
+          #       set -euo pipefail
+          #       : ${VERBOSE:='--verbose'}
+
+          #       az resource delete --ids /subscriptions/5f32302c-f4ec-46c8-951b-87d885736c53/resourceGroups/mcpk01-vnets-d-rg/providers/Microsoft.Network/virtualNetworks/mcpk01-d-vnet/subnets/aks03-subnet/providers/Microsoft.ContainerInstance/serviceAssociationLinks/AzureKubernetesService
+          #       az network vnet subnet update -g mcpk01-vnets-d-rg -n aks03-subnet --vnet-name mcpk01-d-vnet --remove delegations 0
+
+          - task: AzureCLI@2
+            displayName: 'Deploy Disk Encryption Set'
+            inputs:
+              azureSubscription: $(resourceGroup) 
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: >
+                set -euo pipefail
+                : ${VERBOSE:='--verbose'}
+
+                if [ "${SYSTEM_DEBUG:=false}" == "true" ]; then
+                    set -x
+                    VERBOSE='-debug'
+                fi
+
+                az deployment group create ${VERBOSE} \
+                  --name "reference_templates_$(clusterName)" \
+                  --template-file "$(Build.SourcesDirectory)/reference_templates/bicep/diskEncryptionSet.bicep" \
+                  --resource-group "$(resourceGroup)" \
+                  --parameters \
+                    clusterName=$(clusterName) \
+                    keyVaultName=$(keyVaultName)
+
+          - task: AzureCLI@2
+            displayName: "Deploy '${{ variables.clusterName }}' with AKS '${{ variables.aksVersion }}'"
+            inputs:
+              azureSubscription: $(resourceGroup) 
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: >
+                set -euo pipefail
+                : ${VERBOSE:='--verbose'}
+
+                if [ "${SYSTEM_DEBUG:=false}" == "true" ]; then
+                    set -x
+                    VERBOSE='-debug'
+                fi
+
+                az deployment group create ${VERBOSE} \
+                  --name "reference_templates_$(clusterName)" \
+                  --template-file "$(Build.SourcesDirectory)/reference_templates/bicep/aksCluster.bicep" \
+                  --resource-group "$(resourceGroup)" \
+                  --parameters \
+                    clusterName=$(clusterName) \
+                    aksVersion=$(aksVersion) \
+                    dnsPrefix=$(dnsPrefix) \
+                    userAssignedManagedIdentityId=$(userAssignedManagedIdentityId) \
+                    logAnalyticsWorkspaceId=$(logAnalyticsWorkspaceId) \
+                    nodePoolVmSize=$(nodePoolVmSize) \
+                    nodePoolVnetSubnetID=$(nodePoolVnetSubnetID) \
+                    nodePoolVnetPodSubnetID=$(nodePoolVnetPodSubnetID) \
+                    adminGroupObjectID=$(adminGroupObjectID)
